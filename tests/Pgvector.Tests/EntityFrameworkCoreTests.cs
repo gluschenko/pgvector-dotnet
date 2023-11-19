@@ -11,7 +11,7 @@ public class ItemContext : DbContext
     protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
     {
         var connString = "Host=localhost;Database=pgvector_dotnet_test";
-        optionsBuilder.UseNpgsql(connString, o => o.UseVector()).UseSnakeCaseNamingConvention();
+        optionsBuilder.UseNpgsql(connString, o => o.UseVector());
     }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -30,7 +30,7 @@ public class Item
 {
     public int Id { get; set; }
 
-    [Column(TypeName = "vector(3)")]
+    [Column("embedding", TypeName = "vector(3)")]
     public Vector? Embedding { get; set; }
 }
 
@@ -77,173 +77,31 @@ public class EntityFrameworkCoreTests : IClassFixture<EntityFrameworkCoreFixture
 
         var embedding = new Vector(new float[] { 1, 1, 1 });
 
-        var itemsA = await db.Items
-            .FromSql($"SELECT * FROM efcore_items ORDER BY embedding <-> {embedding} LIMIT 5")
-            .ToListAsync();
+        var items = await ctx.Items.FromSql($"SELECT * FROM efcore_items ORDER BY embedding <-> {embedding} LIMIT 5").ToListAsync();
+        Assert.Equal(new int[] { 1, 3, 2 }, items.Select(v => v.Id).ToArray());
+        Assert.Equal(new float[] { 1, 1, 1 }, items[0].Embedding!.ToArray());
 
-        var itemsB = await db.Items
+        items = await ctx.Items.OrderBy(x => x.Embedding!.L2Distance(embedding)).Take(5).ToListAsync();
+        Assert.Equal(new int[] { 1, 3, 2 }, items.Select(v => v.Id).ToArray());
+        Assert.Equal(new float[] { 1, 1, 1 }, items[0].Embedding!.ToArray());
+
+        items = await ctx.Items.OrderBy(x => x.Embedding!.MaxInnerProduct(embedding)).Take(5).ToListAsync();
+        Assert.Equal(new int[] { 2, 3, 1 }, items.Select(v => v.Id).ToArray());
+
+        items = await ctx.Items.OrderBy(x => x.Embedding!.CosineDistance(embedding)).Take(5).ToListAsync();
+        Assert.Equal(3, items[2].Id);
+
+        items = await ctx.Items
+            .OrderBy(x => x.Id)
+            .Where(x => x.Embedding!.L2Distance(embedding) < 1.5)
+            .ToListAsync();
+        Assert.Equal(new int[] { 1, 3 }, items.Select(v => v.Id).ToArray());
+
+        var neighbors = await ctx.Items
             .OrderBy(x => x.Embedding!.L2Distance(embedding))
-            .Take(5)
+            .Select(x => new { Entity = x, Distance = x.Embedding!.L2Distance(embedding) })
             .ToListAsync();
-
-        foreach (Item item in itemsB)
-        {
-            if (item.Embedding != null)
-            {
-                Console.WriteLine(item.Embedding);
-            }
-        }
-
-        Assert.Equal(itemsA.Count, itemsB.Count); // Check amount
-        Assert.Equal(itemsA.Select(x => x.Id).ToArray(), itemsB.Select(x => x.Id).ToArray()); // Check order
-    }
-
-    [Fact]
-    public async Task CosineDistanceSelectOrdered()
-    {
-        var db = _fixture.Db;
-
-        var embedding = new Vector(new float[] { 1, 1, 1 });
-
-        var itemsA = await db.Items
-            .FromSql($"SELECT * FROM efcore_items ORDER BY embedding <=> {embedding} LIMIT 5")
-            .ToListAsync();
-
-        var itemsB = await db.Items
-            .OrderBy(x => x.Embedding!.CosineDistance(embedding))
-            .Take(5)
-            .ToListAsync();
-
-        foreach (Item item in itemsB)
-        {
-            if (item.Embedding != null)
-            {
-                Console.WriteLine(item.Embedding);
-            }
-        }
-
-        Assert.Equal(itemsA.Count, itemsB.Count); // Check amount
-        Assert.Equal(itemsA.Select(x => x.Id).ToArray(), itemsB.Select(x => x.Id).ToArray()); // Check order
-    }
-
-    [Fact]
-    public async Task MaxInnerProductSelectOrdered()
-    {
-        var db = _fixture.Db;
-
-        var embedding = new Vector(new float[] { 1, 1, 1 });
-
-        var itemsA = await db.Items
-            .FromSql($"SELECT * FROM efcore_items ORDER BY embedding <#> {embedding} LIMIT 5")
-            .ToListAsync();
-
-        var itemsB = await db.Items
-            .OrderBy(x => x.Embedding!.MaxInnerProduct(embedding))
-            .Take(5)
-            .ToListAsync();
-
-        foreach (Item item in itemsB)
-        {
-            if (item.Embedding != null)
-            {
-                Console.WriteLine(item.Embedding);
-            }
-        }
-
-        Assert.Equal(itemsA.Count, itemsB.Count); // Check amount
-        Assert.Equal(itemsA.Select(x => x.Id).ToArray(), itemsB.Select(x => x.Id).ToArray()); // Check order
-    }
-
-    [Fact]
-    public async Task L2DistanceQuery()
-    {
-        var db = _fixture.Db;
-
-        var embedding = new Vector(new float[] { 1, 1, 1 });
-
-        var query = db.Items
-            .OrderBy(x => x.Embedding!.L2Distance(embedding))
-            .Take(5);
-
-        var items = await query.ToArrayAsync();
-        Assert.Equal(
-            new[] 
-            {
-                new Vector(new float[] { 1, 1, 1 }),
-                new Vector(new float[] { 2, 2, 2 }),
-                new Vector(new float[] { 0, 0, 0 }),
-                new Vector(new float[] { 3, 3, 3 }),
-                new Vector(new float[] { -1, -1, -1 })
-            }, 
-            items.Select(x => x.Embedding).ToArray()
-        );
-
-        var queryString = query.ToQueryString();
-
-        Console.WriteLine(queryString);
-
-        Assert.Contains("ORDER BY e.embedding <-> @__embedding_0", queryString);
-    }
-
-    [Fact]
-    public async Task CosineDistanceQuery()
-    {
-        var db = _fixture.Db;
-
-        var embedding = new Vector(new float[] { 1, 1, 1 });
-
-        var query = db.Items
-            .OrderBy(x => x.Embedding!.CosineDistance(embedding))
-            .Take(5);
-
-        var items = await query.ToArrayAsync();
-        Assert.Equal(
-            new[]
-            {
-                new Vector(new float[] { 3, 3, 3 }),
-                new Vector(new float[] { 4, 4, 4 }),
-                new Vector(new float[] { 1, 1, 1 }),
-                new Vector(new float[] { 2, 2, 2 }),
-                new Vector(new float[] { 5, 5, 5 })
-            },
-            items.Select(x => x.Embedding).ToArray()
-        );
-
-        var queryString = query.ToQueryString();
-
-        Console.WriteLine(queryString);
-
-        Assert.Contains("ORDER BY e.embedding <=> @__embedding_0", queryString);
-    }
-
-    [Fact]
-    public async Task MaxInnerProductQuery()
-    {
-        var db = _fixture.Db;
-
-        var embedding = new Vector(new float[] { 1, 1, 1 });
-
-        var query = db.Items
-            .OrderBy(x => x.Embedding!.MaxInnerProduct(embedding))
-            .Take(5);
-
-        var items = await query.ToArrayAsync();
-        Assert.Equal(
-            new[]
-            {
-                new Vector(new float[] { 5, 5, 5 }),
-                new Vector(new float[] { 4, 4, 4 }),
-                new Vector(new float[] { 3, 3, 3 }),
-                new Vector(new float[] { 2, 2, 2 }),
-                new Vector(new float[] { 1, 1, 1 })
-            },
-            items.Select(x => x.Embedding).ToArray()
-        );
-
-        var queryString = query.ToQueryString();
-
-        Console.WriteLine(queryString);
-
-        Assert.Contains("ORDER BY e.embedding <#> @__embedding_0", queryString);
+        Assert.Equal(new int[] { 1, 3, 2 }, neighbors.Select(v => v.Entity.Id).ToArray());
+        Assert.Equal(new double[] { 0, 1, Math.Sqrt(3) }, neighbors.Select(v => v.Distance).ToArray());
     }
 }

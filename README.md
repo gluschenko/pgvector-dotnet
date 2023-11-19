@@ -14,6 +14,10 @@ Follow the instructions for your database library:
 - [Dapper](#dapper)
 - [Entity Framework Core](#entity-framework-core)
 
+Or check out an example:
+
+- [Embeddings](tests/Pgvector.Tests/OpenAITests.cs) with OpenAI
+
 ## Npgsql
 
 Run:
@@ -52,7 +56,7 @@ conn.ReloadTypes();
 Create a table
 
 ```csharp
-await using (var cmd = new NpgsqlCommand("CREATE TABLE items (embedding vector(3))", conn))
+await using (var cmd = new NpgsqlCommand("CREATE TABLE items (id serial PRIMARY KEY, embedding vector(3))", conn))
 {
     await cmd.ExecuteNonQueryAsync();
 }
@@ -139,6 +143,7 @@ Define a class
 ```csharp
 public class Item
 {
+    public int Id { get; set; }
     public Vector? Embedding { get; set; }
 }
 ```
@@ -146,7 +151,7 @@ public class Item
 Create a table
 
 ```csharp
-conn.Execute("CREATE TABLE items (embedding vector(3))");
+conn.Execute("CREATE TABLE items (id serial PRIMARY KEY, embedding vector(3))");
 ```
 
 Insert a vector
@@ -216,6 +221,8 @@ Define a model
 ```csharp
 public class Item
 {
+    public int Id { get; set; }
+
     [Column(TypeName = "vector(3)")]
     public Vector? Embedding { get; set; }
 }
@@ -249,6 +256,24 @@ foreach (Item item in items)
         Console.WriteLine(item.Embedding);
     }
 }
+```
+
+Also supports `MaxInnerProduct` and `CosineDistance`
+
+Get the distance
+
+```csharp
+var items = await ctx.Items
+    .Select(x => new { Entity = x, Distance = x.Embedding!.L2Distance(embedding) })
+    .ToListAsync();
+```
+
+Get items within a certain distance
+
+```csharp
+var items = await ctx.Items
+    .Where(x => x.Embedding!.L2Distance(embedding) < 5)
+    .ToListAsync();
 ```
 
 Add an approximate index

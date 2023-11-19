@@ -14,7 +14,7 @@ public class VectorDbContextOptionsExtension : IDbContextOptionsExtension
     public void ApplyServices(IServiceCollection services)
     {
         new EntityFrameworkRelationalServicesBuilder(services)
-            .TryAdd<IMethodCallTranslatorPlugin, VectorFunctionTranslatorPlugin>();
+            .TryAdd<IMethodCallTranslatorPlugin, VectorDbFunctionsTranslatorPlugin>();
 
         services.AddSingleton<IRelationalTypeMappingSourcePlugin, VectorTypeMappingSourcePlugin>();
     }
